@@ -48,28 +48,27 @@ describe('creature', () => {
 });
 
 describe('waves', () => {
+  const occupied = (wave: number) =>
+    waveChains(wave).flatMap((chain) => chain.segments.map((segment) => segment.column));
+
   it('opens with one long body', () => {
     expect(waveChains(1).map((chain) => chain.segments.length)).toEqual([WAVE_SEGMENTS]);
   });
 
-  it('adds heads rather than segments as waves go on', () => {
-    const chains = waveChains(5);
-    expect(chains).toHaveLength(5);
-    expect(segmentCount(chains)).toBe(WAVE_SEGMENTS);
-  });
-
-  it('starts every head in its own clear column', () => {
-    for (let wave = 2; wave < 12; wave++) {
+  it('shares the same segments between more creatures later on', () => {
+    for (let wave = 1; wave < 30; wave++) {
       const chains = waveChains(wave);
-      const columns = chains.flatMap((chain) => chain.segments.map((segment) => segment.column));
-      for (const head of chains.slice(1)) {
-        const near = columns.filter((column) => Math.abs(column - head.segments[0].column) <= 1);
-        expect(near).toHaveLength(1);
-      }
+      expect(segmentCount(chains)).toBe(WAVE_SEGMENTS);
+      expect(chains.length).toBeLessThanOrEqual(3);
+      for (const chain of chains) expect(chain.segments.length).toBeGreaterThanOrEqual(5);
     }
   });
 
-  it('keeps a real body even in very late waves', () => {
-    expect(waveChains(40)[0].segments.length).toBeGreaterThanOrEqual(6);
+  it('never starts two creatures in the same place', () => {
+    for (let wave = 1; wave < 12; wave++) {
+      const columns = occupied(wave);
+      expect(new Set(columns).size).toBe(columns.length);
+      for (const column of columns) expect(column).toBeGreaterThanOrEqual(0);
+    }
   });
 });

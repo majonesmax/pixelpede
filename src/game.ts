@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { startSound, type Sound } from './audio';
-import { hasLanded, spawnHead, splitChain, stepChain, waveChains, type Chain } from './creature';
+import { hasLanded, splitChain, stepChain, waveChains, type Chain } from './creature';
 import {
   COLUMNS,
   ROWS,
@@ -31,9 +31,6 @@ const FIRST_STEP_S = 0.27;
 /** Speed only ramps over the first few waves; after that, difficulty comes from extra heads. */
 const FASTEST_STEP_S = 0.21;
 const STEP_SPEEDUP = 0.88;
-/** From wave 2, a lone head drops in from the top this often while a wave is running. */
-const EXTRA_HEAD_INTERVAL_S = 16;
-const MAX_CHAINS = 9;
 const RESTORE_INTERVAL_S = 0.13;
 const RESTORE_POINTS = 5;
 const STARTING_BLOCKS = 28;
@@ -244,7 +241,6 @@ export function createGame() {
   let diverStrength = 0;
   let diverSeeded = -1;
   let danger = 0;
-  let nextHead = 0;
   /** Damaged mushrooms still to be repaired after a lost life. Null outside that pause. */
   let restoring: Block[] | null = null;
   let restoreClock = 0;
@@ -282,7 +278,6 @@ export function createGame() {
   const startWave = () => {
     chains.length = 0;
     chains.push(...waveChains(wave));
-    nextHead = time + EXTRA_HEAD_INTERVAL_S;
     stepInterval = Math.max(FASTEST_STEP_S, FIRST_STEP_S * STEP_SPEEDUP ** (wave - 1));
     stepClock = 0;
   };
@@ -474,11 +469,6 @@ export function createGame() {
       const lowest = Math.max(0, ...chains.map((chain) => chain.segments[0].row));
       sound?.step(lowest / (ROWS - 1));
       if (chains.some(hasLanded)) hurt();
-    }
-    if (wave > 1 && time >= nextHead && chains.length < MAX_CHAINS) {
-      nextHead = time + EXTRA_HEAD_INTERVAL_S;
-      const head = spawnHead(chains);
-      if (head) chains.push(head);
     }
     if (!chains.length && !gameOver) {
       wave++;

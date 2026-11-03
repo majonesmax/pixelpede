@@ -16,10 +16,11 @@ const clampedSegment = (column: number, row: number): Segment => ({
   previous: { column, row },
 });
 
-export function spawnChain(length: number, startColumn: number): Chain {
+/** A chain on the top row with its head at `headColumn`, trailing back against its direction. */
+export function spawnChain(length: number, headColumn: number, direction: 1 | -1 = 1): Chain {
   const segments: Segment[] = [];
-  for (let i = 0; i < length; i++) segments.push(clampedSegment(startColumn - i, 0));
-  return { direction: 1, segments };
+  for (let i = 0; i < length; i++) segments.push(clampedSegment(headColumn - i * direction, 0));
+  return { direction, segments };
 }
 
 /** The chain takes one step. A blocked head drops a row and turns back, and the body follows. */
@@ -59,43 +60,29 @@ export function splitChain(chain: Chain, index: number): Chain[] {
 
 export const hasLanded = (chain: Chain) => chain.segments[0].row >= ROWS - 1;
 
-/** Total segments per wave. Later waves split them into more independent heads, not more speed. */
+/** Total segments per wave. Later waves divide them between more creatures, not more speed. */
 export const WAVE_SEGMENTS = 15;
-const MAIN_BODY_MIN = 6;
+const MAX_CREATURES = 3;
+/** Waves per extra creature. */
+const WAVES_PER_CREATURE = 3;
 
 /**
- * The creatures a wave opens with: one long body, plus a separate single head for each wave
- * after the first. The heads start in their own columns, clear of the body and of each other, so
- * they read as separate creatures rather than extra heads stuck in the line.
+ * The creatures a wave opens with. Wave 1 is one long body; every few waves the same segments are
+ * shared between more creatures, each a proper body with its own head. They start spread across
+ * the top: from the left heading right, from the right heading left, then down the middle.
  */
-export function waveChains(wave: number, random: () => number = Math.random): Chain[] {
-  const heads = Math.min(wave - 1, WAVE_SEGMENTS - MAIN_BODY_MIN);
-  const body = spawnChain(WAVE_SEGMENTS - heads, WAVE_SEGMENTS - heads - 1);
-  const chains = [body];
-  for (let i = 0; i < heads; i++) {
-    const head = spawnHead(chains, random);
-    if (head) chains.push(head);
-  }
-  return chains;
-}
-
-const GAP_COLUMNS = 1;
-
-/** A lone head on the top row, in a column with clear space around it, or null if there's none. */
-export function spawnHead(existing: readonly Chain[], random: () => number = Math.random) {
-  const taken = new Set<number>();
-  for (const chain of existing) {
-    for (const segment of chain.segments) {
-      if (segment.row !== 0) continue;
-      for (let gap = -GAP_COLUMNS; gap <= GAP_COLUMNS; gap++) taken.add(segment.column + gap);
-    }
-  }
-  const free: number[] = [];
-  for (let column = 0; column < COLUMNS; column++) if (!taken.has(column)) free.push(column);
-  if (!free.length) return null;
-  const chain = spawnChain(1, free[Math.floor(random() * free.length)]);
-  chain.direction = random() < 0.5 ? 1 : -1;
-  return chain;
+export function waveChains(wave: number): Chain[] {
+  const count = Math.min(MAX_CREATURES, 1 + Math.floor((wave - 1) / WAVES_PER_CREATURE));
+  const lengths = Array.from(
+    { length: count },
+    (_, i) => Math.floor(WAVE_SEGMENTS / count) + (i < WAVE_SEGMENTS % count ? 1 : 0),
+  );
+  const starts: [number, 1 | -1][] = [
+    [lengths[0] - 1, 1],
+    [COLUMNS - lengths[1], -1],
+    [Math.floor(COLUMNS / 2) + 2, 1],
+  ];
+  return lengths.map((length, i) => spawnChain(length, ...starts[i]));
 }
 
 export const segmentCount = (chains: readonly Chain[]) =>
