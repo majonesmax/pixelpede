@@ -1,4 +1,4 @@
-# Skycrawler
+# Pixelpede
 
 A prototype VR arcade shooter for Meta Quest 3, built with three.js and WebXR. A giant voxel
 creature winds down out of the night sky toward you while a bug comes for your feet. Shooting the
