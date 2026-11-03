@@ -66,6 +66,8 @@ interface Bolt {
 interface Hand {
   controller: THREE.Group;
   cooldown: number;
+  /** The physical controller this hand is following right now, if any. */
+  source: XRInputSource | null;
 }
 
 function haloTexture() {
@@ -184,7 +186,16 @@ export function createGame() {
     const controller = renderer.xr.getController(index);
     controller.add(gunModel());
     rig.add(controller);
-    return { controller, cooldown: 0 };
+    const hand: Hand = { controller, cooldown: 0, source: null };
+    // The order of a session's input sources isn't fixed: a controller that sleeps, or a switch to
+    // hand tracking and back, can reorder them. Each hand follows its own source instead.
+    controller.addEventListener('connected', (event) => {
+      hand.source = event.data;
+    });
+    controller.addEventListener('disconnected', () => {
+      hand.source = null;
+    });
+    return hand;
   });
 
   const chains: Chain[] = [];
@@ -579,8 +590,7 @@ export function createGame() {
   };
 
   const readControllers = (dt: number) => {
-    const session = renderer.xr.getSession();
-    if (!session) {
+    if (!renderer.xr.isPresenting) {
       desktopCooldown -= dt;
       if (mouseFiring && desktopCooldown <= 0 && !gameOver) {
         desktopCooldown = FIRE_INTERVAL_S;
@@ -597,7 +607,7 @@ export function createGame() {
     let slide = 0;
     hands.forEach((hand, i) => {
       hand.cooldown -= dt;
-      const gamepad = session.inputSources[i]?.gamepad;
+      const gamepad = hand.source?.gamepad;
       if (!gamepad) return;
       if ((gamepad.buttons[0]?.value ?? 0) > 0.4 && hand.cooldown <= 0 && !gameOver) {
         hand.cooldown = FIRE_INTERVAL_S;
@@ -608,7 +618,7 @@ export function createGame() {
       }
       const x = gamepad.axes[2] ?? 0;
       if (Math.abs(x) > 0.15) slide += x;
-      if (justPressed(`b${i}`, gamepad.buttons[5]?.pressed ?? false) && gameOver) newGame();
+      if (justPressed(`b${i}`, gamepad.buttons[5]?.pressed ?? false)) newGame();
     });
     return THREE.MathUtils.clamp(slide, -1, 1);
   };
@@ -648,7 +658,7 @@ export function createGame() {
 
   addEventListener('keydown', (event) => {
     keys.add(event.code);
-    if (event.code === 'KeyB' && gameOver) newGame();
+    if (event.code === 'KeyB') newGame();
   });
   addEventListener('keyup', (event) => keys.delete(event.code));
   renderer.domElement.addEventListener('pointerdown', () => {
@@ -680,6 +690,11 @@ export function createGame() {
         lookYaw = yaw;
         lookPitch = pitch;
       },
+      endGame() {
+        lives = 1;
+        hurt();
+      },
+      boltCount: () => bolts.length,
       stats: () => ({ score, lives, wave, chains: chains.length, blocks: blocks.size }),
       /** Points the desktop view at the head of the nearest creature. */
       aimAtHead() {
