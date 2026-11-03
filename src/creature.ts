@@ -58,3 +58,27 @@ export function splitChain(chain: Chain, index: number): Chain[] {
 }
 
 export const hasLanded = (chain: Chain) => chain.segments[0].row >= ROWS - 1;
+
+/** Total segments per wave. Later waves split them into more independent heads, not more speed. */
+export const WAVE_SEGMENTS = 15;
+const MAIN_BODY_MIN = 6;
+
+/**
+ * The creatures a wave opens with: one long body, plus a separate single head for each wave
+ * after the first, spread across the top so they come at you from different places.
+ */
+export function waveChains(wave: number, random: () => number = Math.random): Chain[] {
+  const heads = Math.min(wave - 1, WAVE_SEGMENTS - MAIN_BODY_MIN);
+  const chains = [spawnChain(WAVE_SEGMENTS - heads, WAVE_SEGMENTS - heads - 1)];
+  for (let i = 0; i < heads; i++) chains.push(spawnHead(random));
+  return chains;
+}
+
+export function spawnHead(random: () => number = Math.random): Chain {
+  const chain = spawnChain(1, Math.floor(random() * COLUMNS));
+  chain.direction = random() < 0.5 ? 1 : -1;
+  return chain;
+}
+
+export const segmentCount = (chains: readonly Chain[]) =>
+  chains.reduce((total, chain) => total + chain.segments.length, 0);

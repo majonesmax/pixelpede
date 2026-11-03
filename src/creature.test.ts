@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { hasLanded, spawnChain, splitChain, stepChain } from './creature';
+import {
+  WAVE_SEGMENTS,
+  hasLanded,
+  segmentCount,
+  spawnChain,
+  splitChain,
+  stepChain,
+  waveChains,
+} from './creature';
 import { COLUMNS, ROWS, cellKey } from './field';
 
 describe('creature', () => {
@@ -36,5 +44,21 @@ describe('creature', () => {
     const chain = spawnChain(4, 8);
     for (let step = 0; step < COLUMNS * ROWS * 2; step++) stepChain(chain, new Set());
     expect(hasLanded(chain)).toBe(true);
+  });
+});
+
+describe('waves', () => {
+  it('opens with one long body', () => {
+    expect(waveChains(1).map((chain) => chain.segments.length)).toEqual([WAVE_SEGMENTS]);
+  });
+
+  it('adds heads rather than segments as waves go on', () => {
+    const chains = waveChains(5);
+    expect(chains).toHaveLength(5);
+    expect(segmentCount(chains)).toBe(WAVE_SEGMENTS);
+  });
+
+  it('keeps a real body even in very late waves', () => {
+    expect(waveChains(40)[0].segments.length).toBeGreaterThanOrEqual(6);
   });
 });

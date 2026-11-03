@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { startSound, type Sound } from './audio';
-import { hasLanded, spawnChain, splitChain, stepChain, type Chain } from './creature';
+import { hasLanded, spawnHead, splitChain, stepChain, waveChains, type Chain } from './creature';
 import {
   COLUMNS,
   ROWS,
@@ -24,11 +24,16 @@ import { createShards } from './shards';
 import { createStage } from './stage';
 
 const STARTING_LIVES = 3;
-const CHAIN_LENGTH = 15;
 const MAX_SEGMENTS = 60;
 const FIRST_STEP_S = 0.27;
-const FASTEST_STEP_S = 0.1;
+/** Speed only ramps over the first few waves; after that, difficulty comes from extra heads. */
+const FASTEST_STEP_S = 0.21;
 const STEP_SPEEDUP = 0.88;
+/** From wave 2, a lone head drops in from the top this often while a wave is running. */
+const EXTRA_HEAD_INTERVAL_S = 16;
+const MAX_CHAINS = 9;
+const RESTORE_INTERVAL_S = 0.13;
+const RESTORE_POINTS = 5;
 const STARTING_BLOCKS = 28;
 const BLOCK_STRENGTH = 3;
 const RAIL_HALF_LENGTH_M = 9;
@@ -211,6 +216,7 @@ export function createGame() {
   const stepStart = new THREE.Vector3();
   const closest = new THREE.Vector3();
   const segmentSpot = new THREE.Vector3();
+  const headUp = new THREE.Vector3();
 
   let score = 0;
   let lives = STARTING_LIVES;
@@ -224,6 +230,11 @@ export function createGame() {
   let diverStrength = 0;
   let diverSeeded = -1;
   let danger = 0;
+  let nextHead = 0;
+  /** Damaged mushrooms still to be repaired after a lost life. Null outside that pause. */
+  let restoring: Block[] | null = null;
+  let restoreClock = 0;
+  let restoreStep = 0;
   let bugHeading = 0;
   let running = false;
   let gameOver = false;
@@ -256,7 +267,8 @@ export function createGame() {
 
   const startWave = () => {
     chains.length = 0;
-    chains.push(spawnChain(CHAIN_LENGTH, CHAIN_LENGTH - 1));
+    chains.push(...waveChains(wave));
+    nextHead = time + EXTRA_HEAD_INTERVAL_S;
     stepInterval = Math.max(FASTEST_STEP_S, FIRST_STEP_S * STEP_SPEEDUP ** (wave - 1));
     stepClock = 0;
   };
@@ -266,6 +278,7 @@ export function createGame() {
     lives = STARTING_LIVES;
     wave = 1;
     gameOver = false;
+    restoring = null;
     blocks.clear();
     seedBlocks(STARTING_BLOCKS);
     startWave();
@@ -274,6 +287,37 @@ export function createGame() {
     nextBug = time + 6;
     nextDiver = time + 9;
     say(mode === 'surround' ? 'Behind you. Look up!' : 'Here it comes');
+  };
+
+  /** After a lost life, the field is cleared and every damaged mushroom regrows, one by one. */
+  const beginRestore = () => {
+    chains.length = 0;
+    bolts.length = 0;
+    diverMesh.visible = false;
+    restoring = [...blocks.values()].filter((block) => block.strength < BLOCK_STRENGTH);
+    restoreClock = 0;
+    restoreStep = 0;
+  };
+
+  const updateRestore = (dt: number) => {
+    if (!restoring) return;
+    restoreClock += dt;
+    while (restoreClock >= RESTORE_INTERVAL_S) {
+      restoreClock -= RESTORE_INTERVAL_S;
+      const block = restoring.shift();
+      if (!block) {
+        restoring = null;
+        nextBug = time + BUG_INTERVAL_S;
+        nextDiver = time + DIVER_INTERVAL_S;
+        startWave();
+        return;
+      }
+      block.strength = BLOCK_STRENGTH;
+      score += RESTORE_POINTS;
+      segmentSpot.set(...cellPosition(block.cell.column, block.cell.row));
+      shards.burst(segmentSpot, 0x46c8ff, cellSize(block.cell.row) * 0.7, 10);
+      sound?.restore(restoreStep++ % 24);
+    }
   };
 
   const hurt = () => {
@@ -286,7 +330,7 @@ export function createGame() {
       say('Press B to play again', 999);
     } else {
       say('It got through!');
-      startWave();
+      beginRestore();
     }
   };
 
@@ -417,6 +461,10 @@ export function createGame() {
       sound?.step(lowest / (ROWS - 1));
       if (chains.some(hasLanded)) hurt();
     }
+    if (wave > 1 && time >= nextHead && chains.length < MAX_CHAINS) {
+      nextHead = time + EXTRA_HEAD_INTERVAL_S;
+      chains.push(spawnHead());
+    }
     if (!chains.length && !gameOver) {
       wave++;
       score += 500;
@@ -533,7 +581,6 @@ export function createGame() {
     bugLegs.forEach((leg, i) => {
       leg.rotation.y = Math.sin(time * 26 + i * 1.7) * 0.5;
     });
-    if (Math.floor(time * 7) !== Math.floor((time - dt) * 7)) sound?.bug();
     const reach = Math.hypot(bug.position.x - rig.position.x, bug.position.z);
     if (reach < BUG_TOUCH_RADIUS_M) {
       nextBug = time + BUG_INTERVAL_S;
@@ -637,7 +684,9 @@ export function createGame() {
     );
     if (!renderer.xr.isPresenting) camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ');
 
-    const phase = running && !gameOver ? updateChains(dt) : Math.min(1, stepClock / stepInterval);
+    const advancing = running && !gameOver && !restoring;
+    const phase = advancing ? updateChains(dt) : Math.min(1, stepClock / stepInterval);
+    updateRestore(dt);
     camera.getWorldQuaternion(cameraFacing);
     twinkle.update(time);
     drawChains(phase);
@@ -645,11 +694,20 @@ export function createGame() {
     drawShadows(phase);
     updateDanger(dt);
     if (running) {
-      updateBug(dt);
-      updateDiver(dt);
+      if (!restoring) {
+        updateBug(dt);
+        updateDiver(dt);
+      }
       updateBolts(dt, phase);
     }
     shards.update(dt);
+    if (sound) {
+      camera.getWorldPosition(origin);
+      camera.getWorldDirection(facing);
+      camera.getWorldQuaternion(quaternion);
+      sound.setListener(origin, facing, headUp.set(0, 1, 0).applyQuaternion(quaternion));
+      sound.setBug(bug.visible && running ? bug.position : null);
+    }
     flash.material.opacity *= Math.exp(-dt * 3);
     flash.visible = flash.material.opacity > 0.01;
     drawHud();
@@ -695,7 +753,19 @@ export function createGame() {
         hurt();
       },
       boltCount: () => bolts.length,
-      stats: () => ({ score, lives, wave, chains: chains.length, blocks: blocks.size }),
+      stats: () => ({
+        score,
+        lives,
+        wave,
+        chains: chains.length,
+        blocks: blocks.size,
+        restoring: restoring?.length ?? -1,
+        damaged: [...blocks.values()].filter((block) => block.strength < BLOCK_STRENGTH).length,
+      }),
+      loseLife: () => hurt(),
+      damageBlocks() {
+        for (const block of blocks.values()) block.strength = 1;
+      },
       /** Points the desktop view at the head of the nearest creature. */
       aimAtHead() {
         const head = chains[0]?.segments[0];
