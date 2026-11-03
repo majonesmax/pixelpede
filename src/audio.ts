@@ -6,6 +6,7 @@ export interface Sound {
   block: () => void;
   step: (nearness: number) => void;
   bug: () => void;
+  dive: () => void;
   hurt: () => void;
   wave: () => void;
 }
@@ -48,6 +49,7 @@ export function startSound(): Sound {
     block: () => tone('triangle', 640, 300, 0.07, 0.22),
     step: (nearness) => tone('sawtooth', 64 + nearness * 44, 42, 0.13, 0.2 + nearness * 0.55),
     bug: () => tone('square', 1700, 900, 0.05, 0.1),
+    dive: () => tone('sawtooth', 2200, 180, 2.2, 0.26),
     hurt() {
       tone('sawtooth', 200, 36, 0.7, 0.8);
       tone('square', 90, 40, 0.5, 0.5);

@@ -28,6 +28,27 @@ function addStars(scene: THREE.Scene) {
   );
 }
 
+/** A distant ring of dark towers. Sliding along the rail shifts them, which sells the depth. */
+function addSkyline(scene: THREE.Scene) {
+  const count = 90;
+  const towers = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+    new THREE.MeshLambertMaterial({ color: 0x1c1248 }),
+    count,
+  );
+  const placement = new THREE.Object3D();
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 130 + Math.random() * 130;
+    placement.position.set(Math.sin(angle) * distance, 0, Math.cos(angle) * distance);
+    placement.scale.set(10 + Math.random() * 20, 12 + Math.random() * 54, 10 + Math.random() * 20);
+    placement.rotation.y = Math.random() * 3;
+    placement.updateMatrix();
+    towers.setMatrixAt(i, placement.matrix);
+  }
+  scene.add(towers);
+}
+
 function addGround(scene: THREE.Scene) {
   scene.add(new THREE.GridHelper(420, 84, 0xff4fd8, 0x35115e));
   const floor = new THREE.Mesh(
@@ -65,6 +86,7 @@ export function createStage(): Stage {
 
   addStars(scene);
   addGround(scene);
+  addSkyline(scene);
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;

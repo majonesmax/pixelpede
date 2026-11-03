@@ -3,7 +3,14 @@ import { startSound, type Sound } from './audio';
 import { hasLanded, spawnChain, splitChain, stepChain, type Chain } from './creature';
 import { COLUMNS, ROWS, cellKey, cellPosition, cellSize, type Cell } from './field';
 import { createHud } from './hud';
-import { bugModel, faceGeometry, gunModel, segmentGeometry } from './models';
+import {
+  blockGeometry,
+  bugModel,
+  diverGeometry,
+  faceGeometry,
+  gunModel,
+  segmentGeometry,
+} from './models';
 import { createShards } from './shards';
 import { createStage } from './stage';
 
@@ -22,11 +29,19 @@ const BOLT_LIFE_S = 1.1;
 const FIRE_INTERVAL_S = 0.13;
 const MAX_BOLTS = 60;
 const BUG_INTERVAL_S = 11;
+const DIVER_INTERVAL_S = 13;
+const DIVER_ROWS_PER_S = 7;
+const DIVER_STRENGTH = 2;
+const DIVER_SEED_CHANCE = 0.3;
+/** Rows from the bottom at which the alarm starts. */
+const DANGER_ROWS = 6;
 const BUG_SPEED_M_S = 10;
 const BUG_HIT_RADIUS_M = 2.6;
 const BUG_TOUCH_RADIUS_M = 2.2;
 const BODY_COLOR = new THREE.Color(0x6dffb0);
 const HEAD_COLOR = new THREE.Color(0xff4fd8);
+/** Blocks lose color as they're worn down, indexed by remaining strength. */
+const BLOCK_COLORS = [0x000000, 0x8a3050, 0x5a70e8, 0x46c8ff].map((hex) => new THREE.Color(hex));
 
 interface Block {
   cell: Cell;
@@ -52,7 +67,7 @@ export function createGame() {
 
   const segmentMesh = new THREE.InstancedMesh(
     segmentGeometry(),
-    new THREE.MeshLambertMaterial(),
+    new THREE.MeshLambertMaterial({ vertexColors: true }),
     MAX_SEGMENTS,
   );
   const faceMesh = new THREE.InstancedMesh(
@@ -61,8 +76,8 @@ export function createGame() {
     MAX_SEGMENTS,
   );
   const blockMesh = new THREE.InstancedMesh(
-    new THREE.OctahedronGeometry(0.62, 0),
-    new THREE.MeshLambertMaterial({ color: 0x46c8ff, flatShading: true }),
+    blockGeometry(),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }),
     COLUMNS * ROWS,
   );
   const boltMesh = new THREE.InstancedMesh(
@@ -70,12 +85,42 @@ export function createGame() {
     new THREE.MeshBasicMaterial({ color: 0xfff27a, toneMapped: false }),
     MAX_BOLTS,
   );
-  for (const mesh of [segmentMesh, faceMesh, blockMesh, boltMesh]) {
+  // Soft pools under everything overhead: they tie the sky to the ground and show how high it is.
+  const shadowMesh = new THREE.InstancedMesh(
+    new THREE.CircleGeometry(0.5, 20).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xff4fd8,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    }),
+    MAX_SEGMENTS + COLUMNS * ROWS,
+  );
+  const diverMesh = new THREE.Mesh(
+    diverGeometry(),
+    new THREE.MeshLambertMaterial({ color: 0xff8a2a, vertexColors: true }),
+  );
+  diverMesh.visible = false;
+  scene.add(diverMesh);
+  const alarm = new THREE.Mesh(
+    new THREE.CircleGeometry(160, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xff1040,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    }),
+  );
+  alarm.position.y = 0.02;
+  scene.add(alarm);
+
+  for (const mesh of [segmentMesh, faceMesh, blockMesh, boltMesh, shadowMesh]) {
     mesh.frustumCulled = false;
     mesh.count = 0;
     scene.add(mesh);
   }
   segmentMesh.setColorAt(0, BODY_COLOR);
+  blockMesh.setColorAt(0, BLOCK_COLORS[BLOCK_STRENGTH]);
 
   const bug = bugModel();
   bug.scale.setScalar(2);
@@ -124,6 +169,12 @@ export function createGame() {
   let stepInterval = FIRST_STEP_S;
   let stepClock = 0;
   let nextBug = 6;
+  let nextDiver = 9;
+  let diverRow = 0;
+  let diverColumn = 0;
+  let diverStrength = 0;
+  let diverSeeded = -1;
+  let danger = 0;
   let bugHeading = 0;
   let running = false;
   let gameOver = false;
@@ -169,7 +220,9 @@ export function createGame() {
     seedBlocks(STARTING_BLOCKS);
     startWave();
     bug.visible = false;
+    diverMesh.visible = false;
     nextBug = time + 6;
+    nextDiver = time + 9;
     say('Look up');
   };
 
@@ -221,8 +274,9 @@ export function createGame() {
         segmentSpot.set(...position);
         if (!nearSegment(bolt, segmentSpot, size * 0.62)) continue;
         score += i === 0 ? 100 : 10;
-        shards.burst(segmentSpot, i === 0 ? 0xff4fd8 : 0x6dffb0, size, 34);
+        shards.burst(segmentSpot, i === 0 ? 0xff4fd8 : 0x6dffb0, size, i === 0 ? 90 : 42);
         sound?.hit();
+        buzz(i === 0 ? 1 : 0.65, i === 0 ? 150 : 80);
         const cell = { column: segment.column, row: segment.row };
         blocks.set(cellKey(cell), { cell, strength: BLOCK_STRENGTH });
         chains.splice(c, 1, ...splitChain(chain, i));
@@ -230,6 +284,21 @@ export function createGame() {
       }
     }
     return false;
+  };
+
+  const strikeDiver = (bolt: Bolt) => {
+    if (!diverMesh.visible || !nearSegment(bolt, diverMesh.position, cellSize(diverRow) * 0.8)) {
+      return false;
+    }
+    diverStrength--;
+    shards.burst(diverMesh.position, 0xff8a2a, cellSize(diverRow), diverStrength > 0 ? 8 : 46);
+    sound?.hit();
+    buzz(0.7, 90);
+    if (diverStrength <= 0) {
+      diverMesh.visible = false;
+      score += 200;
+    }
+    return true;
   };
 
   const strikeBlocks = (bolt: Bolt) => {
@@ -267,7 +336,11 @@ export function createGame() {
       stepStart.copy(bolt.position);
       bolt.position.addScaledVector(bolt.velocity, dt);
       const spent =
-        bolt.life <= 0 || strikeBug(bolt) || strikeChains(bolt, phase) || strikeBlocks(bolt);
+        bolt.life <= 0 ||
+        strikeBug(bolt) ||
+        strikeDiver(bolt) ||
+        strikeChains(bolt, phase) ||
+        strikeBlocks(bolt);
       if (spent) bolts.splice(i, 1);
     }
     bolts.forEach((bolt, i) => {
@@ -309,20 +382,22 @@ export function createGame() {
     let index = 0;
     let heads = 0;
     for (const chain of chains) {
+      let ahead: [number, number, number] | null = null;
       chain.segments.forEach((segment, i) => {
         if (index >= MAX_SEGMENTS) return;
         const { position, size } = segmentAt(segment, phase);
         placement.position.set(...position);
-        placement.position.y += Math.sin(time * 5 + i * 0.8) * size * 0.1;
-        placement.lookAt(rig.position.x, 1.5, 0);
-        placement.scale.setScalar(size * 0.86);
+        placement.position.y += Math.sin(time * 5 + i * 0.8) * size * 0.08;
+        // The head watches you. Each body section follows the one ahead, through the depth.
+        if (ahead) placement.lookAt(...ahead);
+        else placement.lookAt(rig.position.x, 1.5, 0);
+        ahead = position;
+        placement.scale.setScalar(size * (i === 0 ? 1.15 : 0.92));
         placement.updateMatrix();
         segmentMesh.setMatrixAt(index, placement.matrix);
         segmentMesh.setColorAt(index, i === 0 ? HEAD_COLOR : BODY_COLOR);
         index++;
-        if (i === 0) {
-          faceMesh.setMatrixAt(heads++, placement.matrix);
-        }
+        if (i === 0) faceMesh.setMatrixAt(heads++, placement.matrix);
       });
     }
     segmentMesh.count = index;
@@ -332,18 +407,54 @@ export function createGame() {
     if (segmentMesh.instanceColor) segmentMesh.instanceColor.needsUpdate = true;
   };
 
+  const shadowAt = (index: number, position: [number, number, number], size: number) => {
+    placement.position.set(position[0], 0.05, position[2]);
+    placement.rotation.set(0, 0, 0);
+    // Height spreads a shadow out, so a low creature's pool is small, tight and alarming.
+    placement.scale.setScalar(size * (1.2 + position[1] * 0.012));
+    placement.updateMatrix();
+    shadowMesh.setMatrixAt(index, placement.matrix);
+  };
+
+  const drawShadows = (phase: number) => {
+    let index = 0;
+    for (const chain of chains) {
+      for (const segment of chain.segments) {
+        if (index >= MAX_SEGMENTS) break;
+        const { position, size } = segmentAt(segment, phase);
+        shadowAt(index++, position, size);
+      }
+    }
+    for (const block of blocks.values()) {
+      shadowAt(index++, cellPosition(block.cell.column, block.cell.row), cellSize(block.cell.row));
+    }
+    shadowMesh.count = index;
+    shadowMesh.instanceMatrix.needsUpdate = true;
+  };
+
+  /** The whole field pulses red as the creature nears the ground. */
+  const updateDanger = (dt: number) => {
+    const lowest = Math.max(0, ...chains.map((chain) => chain.segments[0].row));
+    const target = THREE.MathUtils.clamp((lowest - (ROWS - 1 - DANGER_ROWS)) / DANGER_ROWS, 0, 1);
+    danger += (target - danger) * Math.min(1, dt * 3);
+    alarm.material.opacity = danger * (0.1 + 0.1 * Math.sin(time * 8));
+  };
+
   const drawBlocks = () => {
     let index = 0;
     for (const block of blocks.values()) {
       placement.position.set(...cellPosition(block.cell.column, block.cell.row));
-      placement.rotation.set(time * 0.6 + index, time * 0.9, 0);
-      placement.scale.setScalar(cellSize(block.cell.row) * (0.3 + block.strength * 0.13));
+      placement.rotation.set(Math.sin(time * 0.5 + index) * 0.25, index * 1.7 + time * 0.2, 0);
+      placement.scale.setScalar(cellSize(block.cell.row) * (0.68 + block.strength * 0.12));
       placement.updateMatrix();
-      blockMesh.setMatrixAt(index++, placement.matrix);
+      blockMesh.setMatrixAt(index, placement.matrix);
+      blockMesh.setColorAt(index, BLOCK_COLORS[block.strength]);
+      index++;
     }
     placement.rotation.set(0, 0, 0);
     blockMesh.count = index;
     blockMesh.instanceMatrix.needsUpdate = true;
+    if (blockMesh.instanceColor) blockMesh.instanceColor.needsUpdate = true;
   };
 
   /** The bug stays on the ground and comes for your feet in fast, unpredictable zigzags. */
@@ -370,6 +481,48 @@ export function createGame() {
       nextBug = time + BUG_INTERVAL_S;
       hurt();
     }
+  };
+
+  const buzz = (strength: number, milliseconds: number) => {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    for (const source of session.inputSources) {
+      try {
+        void source.gamepad?.hapticActuators?.[0]?.pulse(strength, milliseconds);
+      } catch {
+        // Not every runtime supports haptics, and a missed buzz isn't worth a dropped frame.
+      }
+    }
+  };
+
+  /** Plunges straight down a column, seeding new blocks behind it to clog your lower field. */
+  const updateDiver = (dt: number) => {
+    if (!diverMesh.visible) {
+      if (time < nextDiver || gameOver) return;
+      diverColumn = 2 + Math.floor(Math.random() * (COLUMNS - 4));
+      diverRow = 0;
+      diverSeeded = 0;
+      diverStrength = DIVER_STRENGTH;
+      diverMesh.visible = true;
+      nextDiver = time + DIVER_INTERVAL_S;
+      sound?.dive();
+    }
+    diverRow += DIVER_ROWS_PER_S * dt;
+    const row = Math.floor(diverRow);
+    if (row > diverSeeded && row < ROWS - 3) {
+      diverSeeded = row;
+      if (Math.random() < DIVER_SEED_CHANCE) {
+        const cell = { column: diverColumn, row };
+        blocks.set(cellKey(cell), { cell, strength: BLOCK_STRENGTH });
+      }
+    }
+    if (diverRow >= ROWS - 1) {
+      diverMesh.visible = false;
+      return;
+    }
+    diverMesh.position.set(...cellPosition(diverColumn, diverRow));
+    diverMesh.rotation.y = time * 7;
+    diverMesh.scale.setScalar(cellSize(diverRow) * 1.1);
   };
 
   const justPressed = (key: string, pressed: boolean) => {
@@ -430,8 +583,11 @@ export function createGame() {
     const phase = running && !gameOver ? updateChains(dt) : Math.min(1, stepClock / stepInterval);
     drawChains(phase);
     drawBlocks();
+    drawShadows(phase);
+    updateDanger(dt);
     if (running) {
       updateBug(dt);
+      updateDiver(dt);
       updateBolts(dt, phase);
     }
     shards.update(dt);
