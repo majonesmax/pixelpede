@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { COLUMNS, ROWS, cellPosition } from './field';
+import { afterEach, describe, expect, it } from 'vitest';
+import { COLUMNS, ROWS, cellPosition, setMode } from './field';
 
 const middle = (COLUMNS - 1) / 2;
 
@@ -21,5 +21,18 @@ describe('field', () => {
     const [, height, z] = cellPosition(middle, ROWS - 1);
     expect(z).toBeLessThan(-15);
     expect(height).toBeLessThan(8);
+  });
+});
+
+describe('gallery mode', () => {
+  afterEach(() => setMode('surround'));
+
+  it('keeps the whole field in front of the player', () => {
+    setMode('gallery');
+    for (let row = 0; row < ROWS; row++) {
+      for (const column of [0, middle, COLUMNS - 1]) {
+        expect(cellPosition(column, row)[2]).toBeLessThan(-5);
+      }
+    }
   });
 });

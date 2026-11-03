@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 import { startSound, type Sound } from './audio';
 import { hasLanded, spawnChain, splitChain, stepChain, type Chain } from './creature';
-import { COLUMNS, ROWS, cellKey, cellPosition, cellSize, type Cell } from './field';
+import {
+  COLUMNS,
+  ROWS,
+  cellKey,
+  cellPosition,
+  cellSize,
+  setMode,
+  type Cell,
+  type Mode,
+} from './field';
 import { createHud } from './hud';
 import {
   blockGeometry,
@@ -207,7 +216,8 @@ export function createGame() {
   let bugHeading = 0;
   let running = false;
   let gameOver = false;
-  let message = 'Behind you. Look up!';
+  let mode: Mode = 'surround';
+  let message = '';
   let messageUntil = 5;
   let time = 0;
   let lookYaw = 0;
@@ -252,7 +262,7 @@ export function createGame() {
     diverMesh.visible = false;
     nextBug = time + 6;
     nextDiver = time + 9;
-    say('Behind you. Look up!');
+    say(mode === 'surround' ? 'Behind you. Look up!' : 'Here it comes');
   };
 
   const hurt = () => {
@@ -657,7 +667,9 @@ export function createGame() {
 
   return {
     renderer,
-    begin(audio: boolean) {
+    begin(audio: boolean, chosen: Mode = 'surround') {
+      mode = chosen;
+      setMode(chosen);
       if (audio) sound ??= startSound();
       void sound?.ctx.resume();
       running = true;

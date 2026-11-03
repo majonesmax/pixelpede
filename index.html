@@ -14,7 +14,16 @@
         It comes from behind you, crosses the sky overhead, and comes down in front. Stop it before
         it lands.
       </p>
-      <button id="enter">Enter the field</button>
+      <div class="modes">
+        <button data-mode="surround">
+          Surround<small
+            >It crosses the whole sky above you. Best in a swivel chair or standing.</small
+          >
+        </button>
+        <button data-mode="gallery">
+          Gallery<small>Everything in front of you, up close. For a fixed seat.</small>
+        </button>
+      </div>
       <p id="status" role="status"></p>
     </main>
     <script type="module" src="/src/main.ts"></script>

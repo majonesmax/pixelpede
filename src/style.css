@@ -46,3 +46,27 @@ button {
   border-radius: 4px;
   cursor: pointer;
 }
+
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  max-width: 640px;
+}
+
+.modes button {
+  flex: 1 1 240px;
+  text-align: left;
+}
+
+.modes button + button {
+  background: #6dffb0;
+}
+
+.modes small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
