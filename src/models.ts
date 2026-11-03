@@ -83,16 +83,60 @@ export function diverGeometry() {
   return voxelGeometry(voxels, 1 / 8);
 }
 
-/** The eyes and mandibles on the first section, facing +z, which `lookAt` aims at the player. */
-export function faceGeometry() {
-  return mergeGeometries([
-    block(0.2, 0.2, 0.12, -0.21, 0.14, -0.42),
-    block(0.2, 0.2, 0.12, 0.21, 0.14, -0.42),
-    block(0.1, 0.1, 0.34, -0.24, -0.24, -0.52),
-    block(0.1, 0.1, 0.34, 0.24, -0.24, -0.52),
-    block(0.07, 0.42, 0.07, -0.16, 0.56, -0.14),
-    block(0.07, 0.42, 0.07, 0.16, 0.56, -0.14),
-  ]).rotateY(Math.PI);
+/**
+ * The head: a heavier, deeper voxel skull than a body section, with a raised brow, a jutting jaw
+ * line and a dark mouth recess for the mandibles to work in. It faces +z, toward the player.
+ */
+export function headGeometry() {
+  const voxels: Voxel[] = [];
+  for (let x = -4; x <= 4; x++) {
+    for (let y = -3; y <= 4; y++) {
+      for (let z = -4; z <= 4; z++) {
+        const skull = (x * x) / 17 + ((y - 0.5) * (y - 0.5)) / 13 + (z * z) / 16;
+        if (skull > 1) continue;
+        const mouth = z >= 2 && y <= -1 && Math.abs(x) <= 2;
+        if (mouth && z >= 3) continue;
+        const brow = y >= 2 && z >= 2;
+        voxels.push([x, y, z, mouth ? 0.25 : brow ? 1.25 : 1 - Math.max(0, -y) * 0.12]);
+      }
+    }
+  }
+  return voxelGeometry(voxels, 1 / 8);
+}
+
+/** Glowing eyes that stand proud of the skull, and two antennae. */
+export function eyesGeometry() {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const side of [-1, 1]) {
+    parts.push(block(0.24, 0.24, 0.18, side * 0.26, 0.16, 0.47));
+    parts.push(block(0.12, 0.12, 0.08, side * 0.26, 0.16, 0.58));
+    parts.push(block(0.06, 0.42, 0.06, side * 0.22, 0.7, 0.12));
+    parts.push(block(0.06, 0.06, 0.22, side * 0.22, 0.9, 0.2));
+    parts.push(block(0.11, 0.11, 0.11, side * 0.22, 0.9, 0.34));
+  }
+  return mergeGeometries(parts);
+}
+
+/**
+ * One mandible: a hooked pincer built out along +z from a hinge at the origin, curving in toward
+ * the middle. The left one is mirrored from this.
+ */
+export function mandibleGeometry() {
+  const voxels: Voxel[] = [];
+  const shape = [
+    [0, 0],
+    [0, 1],
+    [0, 2],
+    [-1, 3],
+    [-1, 4],
+    [-2, 5],
+    [-3, 5],
+  ];
+  shape.forEach(([x, z], i) => {
+    voxels.push([x, 0, z, i > 4 ? 1.4 : 1]);
+    if (i < 4) voxels.push([x, -1, z, 0.8]);
+  });
+  return voxelGeometry(voxels, 1 / 8);
 }
 
 export function bugModel() {

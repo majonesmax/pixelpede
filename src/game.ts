@@ -16,7 +16,9 @@ import {
   blockGeometry,
   bugModel,
   diverGeometry,
-  faceGeometry,
+  eyesGeometry,
+  headGeometry,
+  mandibleGeometry,
   gunModel,
   segmentGeometry,
 } from './models';
@@ -100,11 +102,22 @@ export function createGame() {
     new THREE.MeshLambertMaterial({ vertexColors: true }),
     MAX_SEGMENTS,
   );
-  const faceMesh = new THREE.InstancedMesh(
-    faceGeometry(),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
+  const headMesh = new THREE.InstancedMesh(
+    headGeometry(),
+    new THREE.MeshLambertMaterial({ color: HEAD_COLOR, vertexColors: true }),
     MAX_SEGMENTS,
   );
+  const eyesMesh = new THREE.InstancedMesh(
+    eyesGeometry(),
+    new THREE.MeshBasicMaterial({ color: 0xfff6a8, toneMapped: false }),
+    MAX_SEGMENTS,
+  );
+  const jawGeometry = mandibleGeometry();
+  const jawMaterial = new THREE.MeshLambertMaterial({ color: 0xffb3f0, vertexColors: true });
+  const jawMeshes = [-1, 1].map((side) => {
+    const geometry = side < 0 ? jawGeometry.clone().scale(-1, 1, 1) : jawGeometry;
+    return { side, mesh: new THREE.InstancedMesh(geometry, jawMaterial, MAX_SEGMENTS) };
+  });
   const blockMesh = new THREE.InstancedMesh(
     blockGeometry(),
     new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }),
@@ -158,7 +171,8 @@ export function createGame() {
   );
   const cameraFacing = new THREE.Quaternion();
 
-  for (const mesh of [segmentMesh, faceMesh, blockMesh, boltMesh, shadowMesh, haloMesh]) {
+  const headMeshes = [headMesh, eyesMesh, ...jawMeshes.map((jaw) => jaw.mesh)];
+  for (const mesh of [segmentMesh, blockMesh, boltMesh, shadowMesh, haloMesh, ...headMeshes]) {
     mesh.frustumCulled = false;
     mesh.count = 0;
     scene.add(mesh);
@@ -476,41 +490,83 @@ export function createGame() {
     return Math.min(1, stepClock / stepInterval);
   };
 
+  const headMatrix = new THREE.Matrix4();
+  const jawMatrix = new THREE.Matrix4();
+  const hinge = new THREE.Matrix4();
+  const swing = new THREE.Matrix4();
+
+  /**
+   * How far a head is lunging right now, 0..1. Each head lurches at you every few seconds,
+   * on its own beat, then snaps back.
+   */
+  const lungeOf = (chainIndex: number) => {
+    const beat = (time * 0.42 + chainIndex * 0.37) % 1;
+    return beat < 0.14 ? Math.sin((beat / 0.14) * Math.PI) : 0;
+  };
+
+  const drawHead = (heads: number, chainIndex: number, size: number) => {
+    const lunge = lungeOf(chainIndex);
+    // The lunge throws the head forward and up, and the jaws gape wide just before they slam.
+    placement.translateZ(size * 0.9 * lunge);
+    placement.rotateX(-0.35 * lunge);
+    placement.scale.setScalar(size * 1.2);
+    placement.updateMatrix();
+    headMatrix.copy(placement.matrix);
+    headMesh.setMatrixAt(heads, headMatrix);
+    eyesMesh.setMatrixAt(heads, headMatrix);
+
+    const chatter = Math.max(0, Math.sin(time * 11 + chainIndex * 2.1)) * 0.28;
+    // At rest the pincers sweep out to the sides, so you see them work even head-on.
+    const open = 0.55 + chatter + lunge * 0.6;
+    for (const { side, mesh } of jawMeshes) {
+      hinge.makeTranslation(side * 0.34, -0.2, 0.3);
+      swing.makeRotationY(side * open);
+      jawMatrix.multiplyMatrices(headMatrix, hinge).multiply(swing);
+      mesh.setMatrixAt(heads, jawMatrix);
+    }
+  };
+
   const drawChains = (phase: number) => {
-    let index = 0;
+    let bodies = 0;
     let heads = 0;
-    for (const chain of chains) {
+    let halos = 0;
+    chains.forEach((chain, chainIndex) => {
       let ahead: [number, number, number] | null = null;
       chain.segments.forEach((segment, i) => {
-        if (index >= MAX_SEGMENTS) return;
+        if (halos >= MAX_SEGMENTS) return;
         const { position, size } = segmentAt(segment, phase);
         placement.position.set(...position);
         placement.position.y += Math.sin(time * 5 + i * 0.8) * size * 0.08;
+        placement.rotation.set(0, 0, 0);
         // The head watches you. Each body section follows the one ahead, through the depth.
         if (ahead) placement.lookAt(...ahead);
         else placement.lookAt(rig.position.x, 1.5, 0);
         ahead = position;
-        placement.scale.setScalar(size * (i === 0 ? 1.15 : 0.92));
-        placement.updateMatrix();
-        segmentMesh.setMatrixAt(index, placement.matrix);
-        segmentMesh.setColorAt(index, i === 0 ? HEAD_COLOR : BODY_COLOR);
-        index++;
-        if (i === 0) faceMesh.setMatrixAt(heads++, placement.matrix);
+        if (i === 0) {
+          drawHead(heads++, chainIndex, size);
+        } else {
+          placement.scale.setScalar(size * 0.92);
+          placement.updateMatrix();
+          segmentMesh.setMatrixAt(bodies, placement.matrix);
+          segmentMesh.setColorAt(bodies++, BODY_COLOR);
+        }
         placement.quaternion.copy(cameraFacing);
         placement.scale.setScalar(size * 2.6);
         placement.updateMatrix();
-        haloMesh.setMatrixAt(index - 1, placement.matrix);
-        haloMesh.setColorAt(index - 1, i === 0 ? HEAD_COLOR : BODY_COLOR);
+        haloMesh.setMatrixAt(halos, placement.matrix);
+        haloMesh.setColorAt(halos++, i === 0 ? HEAD_COLOR : BODY_COLOR);
       });
+    });
+    segmentMesh.count = bodies;
+    haloMesh.count = halos;
+    for (const mesh of headMeshes) {
+      mesh.count = heads;
+      mesh.instanceMatrix.needsUpdate = true;
     }
-    segmentMesh.count = index;
-    haloMesh.count = index;
-    haloMesh.instanceMatrix.needsUpdate = true;
-    if (haloMesh.instanceColor) haloMesh.instanceColor.needsUpdate = true;
-    faceMesh.count = heads;
-    segmentMesh.instanceMatrix.needsUpdate = true;
-    faceMesh.instanceMatrix.needsUpdate = true;
-    if (segmentMesh.instanceColor) segmentMesh.instanceColor.needsUpdate = true;
+    for (const mesh of [segmentMesh, haloMesh]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   };
 
   const shadowAt = (index: number, position: [number, number, number], size: number) => {
@@ -763,6 +819,10 @@ export function createGame() {
         damaged: [...blocks.values()].filter((block) => block.strength < BLOCK_STRENGTH).length,
       }),
       loseLife: () => hurt(),
+      zoom(fov: number) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+      },
       damageBlocks() {
         for (const block of blocks.values()) block.strength = 1;
       },
