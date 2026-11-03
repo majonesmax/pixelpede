@@ -178,7 +178,7 @@ export function createGame() {
   let bugHeading = 0;
   let running = false;
   let gameOver = false;
-  let message = 'Look up';
+  let message = 'Behind you. Look up!';
   let messageUntil = 5;
   let time = 0;
   let lookYaw = 0;
@@ -223,7 +223,7 @@ export function createGame() {
     diverMesh.visible = false;
     nextBug = time + 6;
     nextDiver = time + 9;
-    say('Look up');
+    say('Behind you. Look up!');
   };
 
   const hurt = () => {
