@@ -59,8 +59,22 @@ interface Hand {
   cooldown: number;
 }
 
+function haloTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('2D canvas is unavailable');
+  const glow = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+  glow.addColorStop(0, 'rgba(255,255,255,.55)');
+  glow.addColorStop(0.4, 'rgba(255,255,255,.18)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = glow;
+  context.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(canvas);
+}
+
 export function createGame() {
-  const { renderer, scene, camera, rig } = createStage();
+  const { renderer, scene, camera, rig, twinkle } = createStage();
   const shards = createShards(scene);
   const hud = createHud(rig);
   let sound: Sound | null = null;
@@ -114,12 +128,27 @@ export function createGame() {
   alarm.position.y = 0.02;
   scene.add(alarm);
 
-  for (const mesh of [segmentMesh, faceMesh, blockMesh, boltMesh, shadowMesh]) {
+  // A soft neon halo behind each section, so the creature glows against the night sky.
+  const haloMesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: haloTexture(),
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    }),
+    MAX_SEGMENTS,
+  );
+  const cameraFacing = new THREE.Quaternion();
+
+  for (const mesh of [segmentMesh, faceMesh, blockMesh, boltMesh, shadowMesh, haloMesh]) {
     mesh.frustumCulled = false;
     mesh.count = 0;
     scene.add(mesh);
   }
   segmentMesh.setColorAt(0, BODY_COLOR);
+  haloMesh.setColorAt(0, BODY_COLOR);
   blockMesh.setColorAt(0, BLOCK_COLORS[BLOCK_STRENGTH]);
 
   const bug = bugModel();
@@ -398,9 +427,17 @@ export function createGame() {
         segmentMesh.setColorAt(index, i === 0 ? HEAD_COLOR : BODY_COLOR);
         index++;
         if (i === 0) faceMesh.setMatrixAt(heads++, placement.matrix);
+        placement.quaternion.copy(cameraFacing);
+        placement.scale.setScalar(size * 2.6);
+        placement.updateMatrix();
+        haloMesh.setMatrixAt(index - 1, placement.matrix);
+        haloMesh.setColorAt(index - 1, i === 0 ? HEAD_COLOR : BODY_COLOR);
       });
     }
     segmentMesh.count = index;
+    haloMesh.count = index;
+    haloMesh.instanceMatrix.needsUpdate = true;
+    if (haloMesh.instanceColor) haloMesh.instanceColor.needsUpdate = true;
     faceMesh.count = heads;
     segmentMesh.instanceMatrix.needsUpdate = true;
     faceMesh.instanceMatrix.needsUpdate = true;
@@ -581,6 +618,8 @@ export function createGame() {
     if (!renderer.xr.isPresenting) camera.rotation.set(lookPitch, lookYaw, 0, 'YXZ');
 
     const phase = running && !gameOver ? updateChains(dt) : Math.min(1, stepClock / stepInterval);
+    camera.getWorldQuaternion(cameraFacing);
+    twinkle.update(time);
     drawChains(phase);
     drawBlocks();
     drawShadows(phase);

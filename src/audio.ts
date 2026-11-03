@@ -39,6 +39,27 @@ export function startSound(): Sound {
     oscillator.stop(start + seconds + 0.02);
   };
 
+  // A low, slowly breathing chord under the whole game.
+  const drone = ctx.createGain();
+  drone.gain.value = 0.07;
+  const darken = ctx.createBiquadFilter();
+  darken.type = 'lowpass';
+  darken.frequency.value = 420;
+  drone.connect(darken).connect(output);
+  for (const hz of [55, 55.4, 82.4, 110.3, 164.8]) {
+    const voice = ctx.createOscillator();
+    voice.type = 'sawtooth';
+    voice.frequency.value = hz;
+    voice.connect(drone);
+    voice.start();
+  }
+  const breath = ctx.createOscillator();
+  const breathDepth = ctx.createGain();
+  breath.frequency.value = 0.07;
+  breathDepth.gain.value = 260;
+  breath.connect(breathDepth).connect(darken.frequency);
+  breath.start();
+
   return {
     ctx,
     shoot: () => tone('square', 980, 240, 0.09, 0.14),
