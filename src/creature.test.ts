@@ -58,6 +58,17 @@ describe('waves', () => {
     expect(segmentCount(chains)).toBe(WAVE_SEGMENTS);
   });
 
+  it('starts every head in its own clear column', () => {
+    for (let wave = 2; wave < 12; wave++) {
+      const chains = waveChains(wave);
+      const columns = chains.flatMap((chain) => chain.segments.map((segment) => segment.column));
+      for (const head of chains.slice(1)) {
+        const near = columns.filter((column) => Math.abs(column - head.segments[0].column) <= 1);
+        expect(near).toHaveLength(1);
+      }
+    }
+  });
+
   it('keeps a real body even in very late waves', () => {
     expect(waveChains(40)[0].segments.length).toBeGreaterThanOrEqual(6);
   });

@@ -477,7 +477,8 @@ export function createGame() {
     }
     if (wave > 1 && time >= nextHead && chains.length < MAX_CHAINS) {
       nextHead = time + EXTRA_HEAD_INTERVAL_S;
-      chains.push(spawnHead());
+      const head = spawnHead(chains);
+      if (head) chains.push(head);
     }
     if (!chains.length && !gameOver) {
       wave++;
